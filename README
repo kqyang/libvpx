@@ -137,3 +137,13 @@ SUPPORT
   This library is an open source project supported by its community. Please
   please email webm-discuss@webmproject.org for help.
 
+```
+mkdir build
+cd build
+../configure --enable-vp9-highbitdepth
+mkdir libvpx-test-data
+LIBVPX_TEST_DATA_PATH=libvpx-test-data make testdata
+make
+
+./vpxdec libvpx-test-data/vp93-2-20-12bit-yuv444.webm --summary --noblit
+```
