@@ -1854,6 +1854,7 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
   if (cm->show_existing_frame) {
     // Show an existing frame directly.
     const int frame_to_show = cm->ref_frame_map[vpx_rb_read_literal(rb, 3)];
+    fprintf(stderr, "show existing\n");
     lock_buffer_pool(pool);
     if (frame_to_show < 0 || frame_bufs[frame_to_show].ref_count < 1) {
       unlock_buffer_pool(pool);
@@ -1880,6 +1881,7 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
   cm->error_resilient_mode = vpx_rb_read_bit(rb);
 
   if (cm->frame_type == KEY_FRAME) {
+    fprintf(stderr, "keyframe\n");
     if (!vp9_read_sync_code(rb))
       vpx_internal_error(&cm->error, VPX_CODEC_UNSUP_BITSTREAM,
                          "Invalid frame sync code");
@@ -1904,6 +1906,7 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
         0 : vpx_rb_read_literal(rb, 2);
 
     if (cm->intra_only) {
+      fprintf(stderr, "intra\n");
       if (!vp9_read_sync_code(rb))
         vpx_internal_error(&cm->error, VPX_CODEC_UNSUP_BITSTREAM,
                            "Invalid frame sync code");
@@ -1930,6 +1933,7 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
         pbi->need_resync = 0;
       }
     } else if (pbi->need_resync != 1) {  /* Skip if need resync */
+      fprintf(stderr, "refresh\n");
       pbi->refresh_frame_flags = vpx_rb_read_literal(rb, REF_FRAMES);
       for (i = 0; i < REFS_PER_FRAME; ++i) {
         const int ref = vpx_rb_read_literal(rb, REF_FRAMES_LOG2);
@@ -1940,7 +1944,11 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
         cm->ref_frame_sign_bias[LAST_FRAME + i] = vpx_rb_read_bit(rb);
       }
 
+      fprintf(stderr, "offset before setup_frame_size_with_refs %zu\n",
+              rb->bit_offset);
       setup_frame_size_with_refs(cm, rb);
+      fprintf(stderr, "offset after setup_frame_size_with_refs %zu\n",
+              rb->bit_offset);
 
       cm->allow_high_precision_mv = vpx_rb_read_bit(rb);
       cm->interp_filter = read_interp_filter(rb);
@@ -2017,6 +2025,7 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
   if (frame_is_intra_only(cm) || cm->error_resilient_mode)
     vp9_setup_past_independence(cm);
 
+  fprintf(stderr, "offset before setup_loopfilter %zu\n", rb->bit_offset);
   setup_loopfilter(&cm->lf, rb);
   setup_quantization(cm, &pbi->mb, rb);
   setup_segmentation(&cm->seg, rb);
@@ -2028,7 +2037,8 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
   if (sz == 0)
     vpx_internal_error(&cm->error, VPX_CODEC_CORRUPT_FRAME,
                        "Invalid header size");
-
+  fprintf(stderr, "final offset: %zu ", rb->bit_offset);
+  fprintf(stderr, "header size: %zu\n", sz);
   return sz;
 }
 
@@ -2135,12 +2145,23 @@ void vp9_decode_frame(VP9Decoder *pbi,
   struct vpx_read_bit_buffer rb;
   int context_updated = 0;
   uint8_t clear_data[MAX_VP9_HEADER_SIZE];
+  size_t data_size = data_end - data;
   const size_t first_partition_size = read_uncompressed_header(pbi,
       init_read_bit_buffer(pbi, &rb, data, data_end, clear_data));
   const int tile_rows = 1 << cm->log2_tile_rows;
   const int tile_cols = 1 << cm->log2_tile_cols;
+  size_t i;
+
   YV12_BUFFER_CONFIG *const new_fb = get_frame_new_buffer(cm);
   xd->cur_buf = new_fb;
+
+  fprintf(stderr, "read_uncompressed_header with size %zu", data_size);
+  if (data_size > MAX_VP9_HEADER_SIZE) data_size = MAX_VP9_HEADER_SIZE;
+  for (i = 0; i < data_size; ++i) {
+    if ((i % 8) == 0) fprintf(stderr, "\n");
+    fprintf(stderr, "0x%02x, ", data[i]);
+  }
+  fprintf(stderr, "\n-----\n");
 
   if (!first_partition_size) {
     // showing a frame directly

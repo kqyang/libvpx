@@ -541,6 +541,7 @@ static vpx_codec_err_t decoder_decode(vpx_codec_alg_priv_t *ctx,
   vpx_codec_err_t res;
   uint32_t frame_sizes[8];
   int frame_count;
+  int i;
 
   if (data == NULL && data_sz == 0) {
     ctx->flushed = 1;
@@ -561,6 +562,17 @@ static vpx_codec_err_t decoder_decode(vpx_codec_alg_priv_t *ctx,
                                    ctx->decrypt_cb, ctx->decrypt_state);
   if (res != VPX_CODEC_OK)
     return res;
+
+  if (frame_count > 1) {
+    fprintf(stderr,
+            "superframe frame_count: %d data_size: %u\nLast 32 bytes:",
+            frame_count, data_sz);
+    for (i = 0; i < 32; ++i) {
+      if ((i % 8) == 0) fprintf(stderr, "\n");
+      fprintf(stderr, "0x%02x, ", data[data_sz - 32 + i]);
+    }
+    fprintf(stderr, "\n-----\n");
+  }
 
   if (ctx->frame_parallel_decode) {
     // Decode in frame parallel mode. When decoding in this mode, the frame
