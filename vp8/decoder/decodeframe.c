@@ -292,6 +292,7 @@ static int get_delta_q(vp8_reader *bc, int prev, int *q_update)
 
         if (vp8_read_bit(bc))
             ret_val = -ret_val;
+        fprintf(stderr, "delta_q: %d\n", (int)(ret_val));
     }
 
     /* Trigger a quantizer update if the delta-q value has changed */
@@ -981,6 +982,13 @@ static void init_frame(VP8D_COMP *pbi)
 
 }
 
+void debug_print(const vp8_reader *bc, const unsigned char *start,
+                 const char *label) {
+  int byte_pos = bc->user_buffer - start;
+  fprintf(stderr, "%s pos: %d reader byte offset: %d bit count: %d\n", label,
+          byte_pos * 8 - bc->count - 8, byte_pos, bc->count);
+}
+
 int vp8_decode_frame(VP8D_COMP *pbi)
 {
     vp8_reader *const bc = &pbi->mbc[8];
@@ -989,6 +997,8 @@ int vp8_decode_frame(VP8D_COMP *pbi)
     const unsigned char *data = pbi->fragments.ptrs[0];
     const unsigned char *data_end =  data + pbi->fragments.sizes[0];
     ptrdiff_t first_partition_length_in_bytes;
+    const unsigned char* start_addr = data;
+    size_t data_size = data_end - data;
 
     int i, j, k, l;
     const int *const mb_feature_data_bits = vp8_mb_feature_data_bits;
@@ -996,6 +1006,15 @@ int vp8_decode_frame(VP8D_COMP *pbi)
     int prev_independent_partitions = pbi->independent_partitions;
 
     YV12_BUFFER_CONFIG *yv12_fb_new = pbi->dec_fb_ref[INTRA_FRAME];
+
+    fprintf(stderr, "\n-----\n");
+    fprintf(stderr, "decode_frame with size %zu", data_size);
+    if (data_size > 100) data_size = 100;
+    for (i = 0; i < data_size; ++i) {
+      if ((i % 8) == 0) fprintf(stderr, "\n");
+      fprintf(stderr, "0x%02x, ", data[i]);
+    }
+    fprintf(stderr, "\n-----\n");
 
     /* start with no corruption of current frame */
     xd->corrupted = 0;
@@ -1033,6 +1052,9 @@ int vp8_decode_frame(VP8D_COMP *pbi)
         pc->show_frame = (clear[0] >> 4) & 1;
         first_partition_length_in_bytes =
             (clear[0] | (clear[1] << 8) | (clear[2] << 16)) >> 5;
+
+        fprintf(stderr, "header size: %u frame_type: %d\n",
+                (uint32_t)first_partition_length_in_bytes, pc->frame_type);
 
         if (!pbi->ec_active &&
             (data + first_partition_length_in_bytes > data_end
@@ -1089,6 +1111,8 @@ int vp8_decode_frame(VP8D_COMP *pbi)
                            pbi->decrypt_cb, pbi->decrypt_state))
         vpx_internal_error(&pc->error, VPX_CODEC_MEM_ERROR,
                            "Failed to allocate bool decoder 0");
+
+    debug_print(bc, start_addr, "start_decode");
     if (pc->frame_type == KEY_FRAME) {
         (void)vp8_read_bit(bc);  // colorspace
         pc->clamp_type  = (CLAMP_TYPE)vp8_read_bit(bc);
@@ -1149,6 +1173,7 @@ int vp8_decode_frame(VP8D_COMP *pbi)
         xd->update_mb_segmentation_data = 0;
     }
 
+    debug_print(bc, start_addr, "loop filter");
     /* Read the loop filter level and type */
     pc->filter_type = (LOOPFILTERTYPE) vp8_read_bit(bc);
     pc->filter_level = vp8_read_literal(bc, 6);
@@ -1195,6 +1220,7 @@ int vp8_decode_frame(VP8D_COMP *pbi)
 
     setup_token_decoder(pbi, data + first_partition_length_in_bytes);
 
+    debug_print(bc, start_addr, "quantization");
     xd->current_bc = &pbi->mbc[0];
 
     /* Read the default quantizers. */
@@ -1202,6 +1228,7 @@ int vp8_decode_frame(VP8D_COMP *pbi)
         int Q, q_update;
 
         Q = vp8_read_literal(bc, 7);  /* AC 1st order Q = default */
+        fprintf(stderr, "qindex: %d\n", Q);
         pc->base_qindex = Q;
         q_update = 0;
         pc->y1dc_delta_q = get_delta_q(bc, pc->y1dc_delta_q, &q_update);
@@ -1217,6 +1244,7 @@ int vp8_decode_frame(VP8D_COMP *pbi)
         vp8_mb_init_dequantizer(pbi, &pbi->mb);
     }
 
+    debug_print(bc, start_addr, "refresh frames");
     /* Determine if the golden frame or ARF buffer should be updated and how.
      * For all non key frames the GF and ARF refresh flags and sign bias
      * flags must be set explicitly.
@@ -1305,6 +1333,7 @@ int vp8_decode_frame(VP8D_COMP *pbi)
         fclose(z);
     }
 
+    debug_print(bc, start_addr, "coef probability tree");
     {
         pbi->independent_partitions = 1;
 
@@ -1331,8 +1360,10 @@ int vp8_decode_frame(VP8D_COMP *pbi)
     /* clear out the coeff buffer */
     memset(xd->qcoeff, 0, sizeof(xd->qcoeff));
 
+    debug_print(bc, start_addr, "before decode_mode_mvs");
     vp8_decode_mode_mvs(pbi);
 
+    debug_print(bc, start_addr, "after decode_mode_mvvs");
 #if CONFIG_ERROR_CONCEALMENT
     if (pbi->ec_active &&
             pbi->mvs_corrupt_from_mb < (unsigned int)pc->mb_cols * pc->mb_rows)
